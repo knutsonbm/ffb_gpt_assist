@@ -1,35 +1,51 @@
-import requests
-import pandas as pd
-import os
+#!/usr/bin/env python3
+import os, requests, pandas as pd
 from pathlib import Path
 
-LEAGUE_ID = os.getenv("LEAGUE_ID", "1257452477297479680")
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
+DATA = Path("data"); DATA.mkdir(exist_ok=True)
+LEAGUE_ID = os.getenv("LEAGUE_ID")
+BASE = "https://api.sleeper.app/v1"
 
-ENDPOINTS = {
-    "rosters": f"https://api.sleeper.app/v1/league/{LEAGUE_ID}/rosters",
-    "matchups": f"https://api.sleeper.app/v1/league/{LEAGUE_ID}/matchups/1",  # week 1 for now
-    "users": f"https://api.sleeper.app/v1/league/{LEAGUE_ID}/users",
-    "transactions": f"https://api.sleeper.app/v1/league/{LEAGUE_ID}/transactions/1",  # week 1
-}
+def jget(url):
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
-def fetch_and_save(name, url):
-    print(f"Fetching {name} from {url}")
-    resp = requests.get(url)
-    resp.raise_for_status()
-    data = resp.json()
+def save_json_csv(name: str, data):
     df = pd.json_normalize(data)
-    out_path = DATA_DIR / f"{name}.csv"
-    df.to_csv(out_path, index=False)
-    print(f"Saved {name} → {out_path}")
+    out = DATA / f"{name}.csv"
+    df.to_csv(out, index=False)
+    print(f"Saved {out} ({len(df)} rows)")
 
 def main():
-    for name, url in ENDPOINTS.items():
+    if not LEAGUE_ID:
+        raise SystemExit("LEAGUE_ID env var required")
+
+    # Pull basic league data
+    rosters = jget(f"{BASE}/league/{LEAGUE_ID}/rosters")
+    users   = jget(f"{BASE}/league/{LEAGUE_ID}/users")
+    save_json_csv("rosters_current", rosters)
+    save_json_csv("users", users)
+
+    # Figure out current NFL week (may be None in preseason)
+    state = jget(f"{BASE}/state/nfl")
+    week = state.get("week")
+    if week:
         try:
-            fetch_and_save(name, url)
-        except Exception as e:
-            print(f"Error fetching {name}: {e}")
+            week = int(week)
+        except Exception:
+            week = None
+
+    # Fetch matchups & transactions for current week if available
+    if week:
+        matchups = jget(f"{BASE}/league/{LEAGUE_ID}/matchups/{week}")
+        txs      = jget(f"{BASE}/league/{LEAGUE_ID}/transactions/{week}")
+        save_json_csv(f"matchups_{week}", matchups)
+        save_json_csv(f"transactions_{week}", txs)
+        # also keep a "current" pointer for downstream scripts
+        (DATA / "matchups_current.csv").write_text("")  # placeholder touch
+    else:
+        print("No current NFL week reported (preseason or off-season) — skipping matchups/transactions.")
 
 if __name__ == "__main__":
     main()
