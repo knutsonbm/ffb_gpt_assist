@@ -28,6 +28,13 @@ jobs:
           LEAGUE_ID: ${{ secrets.LEAGUE_ID }}
         run: python scripts/sleeper_sync.py
 
+      - name: Build players map
+        run: python scripts/sleeper_players_map.py
+
+      - name: Enrich CSVs with names
+        run: python scripts/enrich_with_names.py
+  
+
       - name: Upload data artifacts
         uses: actions/upload-artifact@v4
         with:
